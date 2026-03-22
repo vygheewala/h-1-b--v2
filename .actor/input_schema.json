@@ -50,7 +50,7 @@
         "Past Week",
         "Past Month"
       ],
-      "default": "Past 24 Hours"
+      "default": "Past Week"
     },
 
     "skills": {
