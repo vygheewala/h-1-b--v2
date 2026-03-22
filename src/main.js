@@ -28,11 +28,11 @@
  */
 
 import { Actor, Dataset } from 'apify';
-import { scrapeATSJobs }           from './scrapers/ats-google.js';
+import { scrapeATSJobs, isValidCompany } from './scrapers/ats-google.js';
 import { checkH1BHistory }         from './checkers/h1b-checker.js';
 import { checkEVerify }            from './checkers/everify-checker.js';
 import { detectStaffingAgency }    from './utils/agency-detector.js';
-import { calculateSkillScore, calculateVisaScore, calculateUrgency } from './utils/scorer.js';
+import { calculateSkillScore, calculateVisaScore, calculateUrgency, buildEnrichedSkillsList } from './utils/scorer.js';
 import { detectSponsorshipLanguage } from './utils/sponsorship-detector.js';
 import { fetchJobDescription }       from './utils/description-fetcher.js';
 import { createObjectCsvWriter }   from 'csv-writer';
@@ -58,14 +58,18 @@ await Actor.main(async () => {
   } = input || {};
 
   const keywordsArray = keywords.split('\n').map(k => k.trim()).filter(Boolean);
-  const skillsArray = skills.split("\n").map(s => s.trim()).filter(Boolean);
-  const fullContextText = `${skills}\n${resumeText}`;
+  // Skills from the form field
+  const skillsFromForm = skills.split("\n").map(s => s.trim()).filter(Boolean);
+
+  // Build enriched skills list: form skills + skills extracted from resume
+  // This is then matched against JOB descriptions (not mixed with them)
+  const enrichedSkills = buildEnrichedSkillsList(skillsFromForm, resumeText);
 
   console.log(`\n📋 CONFIGURATION`);
   console.log(`   Keywords:    ${keywordsArray.join(', ')}`);
   console.log(`   Location:    ${location}`);
   console.log(`   Time filter: ${timeFilter}`);
-  console.log(`   Skills:      ${skillsArray.slice(0, 6).join(", ")}${skillsArray.length > 6 ? ` (+${skillsArray.length - 6} more)` : ""}`);
+  console.log(`   Skills:      ${skillsFromForm.slice(0, 6).join(", ")}${skillsFromForm.length > 6 ? ` (+${skillsFromForm.length - 6} more)` : ""} + ${enrichedSkills.length - skillsFromForm.length} from resume`);
   console.log(`   Resume:      ${resumeText.length > 0 ? resumeText.length + " chars provided" : "Not provided"}`);
   if (optEndDate) {
     const u = calculateUrgency(optEndDate);
@@ -107,7 +111,21 @@ await Actor.main(async () => {
     console.log(`       Company: ${job.company} | Source: ${job.source}`);
 
     try {
-      // 1. Agency check
+      // 1. Company name validation — skip if URL extraction clearly failed
+      if (!isValidCompany(job.company)) {
+        console.log(`       ⛔ Skipped — could not extract valid company name (got: "${job.company}")`);
+        continue;
+      }
+
+      // 2. Non-US filter — skip jobs that appear to be outside the US
+      // Detected by 2-letter locale codes like /de/, /fr/, /uk/ in the URL
+      const nonUsPattern = /\/(de|fr|uk|au|ca|gb|es|nl|it|br|mx|in|sg|jp|cn)\//i;
+      if (nonUsPattern.test(job.jobUrl)) {
+        console.log(`       ⛔ Skipped — appears to be a non-US job posting`);
+        continue;
+      }
+
+      // 3. Agency check
       const agencyResult = detectStaffingAgency(job.company);
       if (excludeStaffingAgencies && agencyResult.isAgency && agencyResult.confidence !== 'low') {
         console.log(`       ⛔ Skipped — ${agencyResult.reason}`);
@@ -140,7 +158,10 @@ await Actor.main(async () => {
 
       // 6. Scoring
       const companySize  = h1bData.petitionCount >= 200 ? 'large' : h1bData.petitionCount >= 20 ? 'medium' : 'small';
-      const skillScore   = calculateSkillScore(skillsArray, job.title, descText + " " + fullContextText);
+      // Skill score: match user skills against job description ONLY (not resume)
+      // Resume text is kept separate to avoid inflating all scores to 10/10
+      // Match enriched skills (form + resume-extracted) against job description only
+      const skillScore   = calculateSkillScore(enrichedSkills, job.title, descText);
       const visaResult   = calculateVisaScore(h1bData, everify.isEVerify, agencyResult.isAgency, companySize);
       const finalVisa    = sponsorship.visaScoreOverride !== null ? sponsorship.visaScoreOverride : visaResult.score;
 
