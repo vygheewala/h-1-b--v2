@@ -100,9 +100,24 @@ const wait = (ms) => new Promise(res => setTimeout(res, ms));
 // Pick a random item from an array
 const randItem = (arr) => arr[randInt(0, arr.length - 1)];
 
+// ── TIME FILTER → DUCKDUCKGO df PARAMETER ────────────────────
+// DuckDuckGo uses df= for date filtering
+const DDG_TIME_MAP = {
+  'All':          '',
+  'Past Hour':    'df=h',
+  'Past 4 Hours': 'df=h',   // DDG doesn't support sub-day, use h as closest
+  'Past 8 Hours': 'df=h',
+  'Past 12 Hours':'df=h',
+  'Past 24 Hours':'df=d',
+  'Past 48 Hours':'df=d',
+  'Past 72 Hours':'df=w',
+  'Past Week':    'df=w',
+  'Past Month':   'df=m',
+};
+
 // ── BUILD SEARCH REQUESTS ─────────────────────────────────────
 export function buildSearchRequests(keywords, location, timeFilter) {
-  const tbsParam = TIME_FILTER_MAP[timeFilter] || '';
+  const dfParam = DDG_TIME_MAP[timeFilter] || '';
   const requests = [];
 
   const locationSuffix = location &&
@@ -114,16 +129,18 @@ export function buildSearchRequests(keywords, location, timeFilter) {
   for (const keyword of keywords) {
     for (const ats of ATS_SITES) {
       const query = ats.isSubdomain
-        ? `inurl:"${ats.site}" "${keyword}"${locationSuffix}`
+        ? `inurl:${ats.site} "${keyword}"${locationSuffix}`
         : `site:${ats.site} "${keyword}"${locationSuffix}`;
 
-      // gl=us forces US results, hl=en forces English, avoids EU cookie consent walls
-      let googleUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=20&gl=us&hl=en`;
-      if (tbsParam) googleUrl += `&${tbsParam}`;
+      // DuckDuckGo HTML endpoint — no JS rendering needed, no consent walls,
+      // no rate limiting, works perfectly on cloud/datacenter IPs
+      // Using html.duckduckgo.com which returns plain HTML (faster + more reliable)
+      let ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`;
+      if (dfParam) ddgUrl += `&${dfParam}`;
 
       requests.push({
-        url: googleUrl,
-        label: 'GOOGLE_SEARCH',
+        url: ddgUrl,
+        label: 'DDG_SEARCH',
         userData: { keyword, ats, query },
       });
     }
@@ -134,12 +151,12 @@ export function buildSearchRequests(keywords, location, timeFilter) {
 
 // ── MAIN SCRAPER ──────────────────────────────────────────────
 export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeyword = 30) {
-  console.log(`\n🔍 Starting Google ATS scraper (v4 — ${ATS_SITES.length} platforms)...`);
+  console.log(`\n🔍 Starting DuckDuckGo ATS scraper (v4 — ${ATS_SITES.length} platforms)...`);
   console.log(`   Keywords:    ${keywords.join(', ')}`);
   console.log(`   Location:    ${location || 'Worldwide'}`);
   console.log(`   Time filter: ${timeFilter} → ${TIME_FILTER_MAP[timeFilter] || 'no filter'}`);
   console.log(`   Total searches: ${keywords.length} keywords × ${ATS_SITES.length} platforms = ${keywords.length * ATS_SITES.length}`);
-  console.log(`   Delay between searches: 4–10 seconds (prevents Google 429 blocks)\n`);
+  console.log(`   Search engine: DuckDuckGo (no rate limiting, no consent walls)\n`);
 
   const requests    = buildSearchRequests(keywords, location, timeFilter);
   const jobMap      = new Map();   // URL → job (deduplication)
@@ -181,73 +198,60 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
       searchsDone++;
       log.info(`[${searchsDone}/${requests.length}] Searching: ${query}`);
 
-      // Small polite delay
-      const delayMs = randInt(1500, 3000);
+      // Small polite delay — DuckDuckGo is much more lenient than Google
+      // but we still wait briefly to be respectful
+      const delayMs = randInt(800, 2000);
       await wait(delayMs);
 
-      // ── HANDLE GOOGLE CONSENT / COOKIE WALL ──────────────────
-      // Apify proxy IPs (often EU-routed) trigger Google's consent page.
-      // We detect it and click "Accept all" to get to the actual results.
+      // ── WAIT FOR DUCKDUCKGO RESULTS ───────────────────────────
+      // DuckDuckGo HTML endpoint returns a plain HTML page with results
+      // in <div class="result"> elements — no JavaScript needed
       try {
-        const consentSelectors = [
-          'button[aria-label="Accept all"]',
-          'button[aria-label="Agree to the use of cookies and other data for the purposes described"]',
-          '#L2AGLb',           // "Accept all" button ID on consent.google.com
-          'button.tHlp8d',     // alternative consent button class
-          'form[action*="consent"] button',
-        ];
-        for (const sel of consentSelectors) {
-          const btn = await page.$(sel);
-          if (btn) {
-            log.info(`   Consent page detected — clicking accept...`);
-            await btn.click();
-            await wait(2000);
-            break;
-          }
-        }
-      } catch { /* no consent page — continue normally */ }
-
-      // ── WAIT FOR GOOGLE SEARCH RESULTS ───────────────────────
-      try {
-        await page.waitForSelector('#search, #rso, .g, [data-async-context]', { timeout: 12000 });
+        await page.waitForSelector('.result, .results, #links, .web-result', { timeout: 12000 });
       } catch {
-        // Last resort: check if we're still on a consent/interstitial page
-        const url = page.url();
-        if (url.includes('consent.google') || url.includes('accounts.google')) {
-          log.warning(`   Blocked by Google consent/login page — skipping: ${query}`);
-        } else {
-          log.warning(`   No results rendered for: ${query}`);
-        }
+        log.warning(`   No results for: ${query}`);
         return;
       }
-      await wait(1000);
+      await wait(500);
 
-      // ── EXTRACT JOB LINKS ─────────────────────────────────────
-      // FIX: page.evaluate() only accepts ONE argument.
-      // We wrap atsSite + isSubdomain into a single object.
-      const links = await page.evaluate(({ atsSite, isSubdomain }) => {
+      // ── EXTRACT JOB LINKS FROM DUCKDUCKGO RESULTS ────────────
+      const links = await page.evaluate(({ atsSite }) => {
         const found = [];
 
-        document.querySelectorAll('div.g, div[data-hveid]').forEach((div) => {
-          const anchor  = div.querySelector('a[href]');
-          const href    = anchor?.getAttribute('href') || '';
-          if (!href.startsWith('http')) return;
+        // DuckDuckGo HTML results are in <div class="result"> containers
+        // Each has an <a class="result__a"> with the actual URL
+        const resultDivs = document.querySelectorAll(
+          '.result, .web-result, [data-testid="result"]'
+        );
 
-          // Match: URL contains the ATS site string
-          if (!href.includes(atsSite)) return;
+        resultDivs.forEach((div) => {
+          // Get the main result link
+          const anchor = div.querySelector('a.result__a, a[data-testid="result-title-a"], h2 a, .result__title a');
+          const href   = anchor?.getAttribute('href') || '';
 
-          const titleEl   = div.querySelector('h3');
-          const snippetEl = div.querySelector('.VwiC3b, .lyLwlc, [data-sncf]');
+          // DuckDuckGo sometimes wraps URLs in a redirect — extract the real URL
+          let realUrl = href;
+          if (href.includes('duckduckgo.com/l/?uddg=')) {
+            try {
+              const urlParam = new URL(href).searchParams.get('uddg');
+              if (urlParam) realUrl = decodeURIComponent(urlParam);
+            } catch { /* keep original href */ }
+          }
+
+          if (!realUrl.startsWith('http')) return;
+          if (!realUrl.includes(atsSite)) return;
+
+          const titleEl   = div.querySelector('.result__a, .result__title a, h2 a');
+          const snippetEl = div.querySelector('.result__snippet, [data-testid="result-snippet"]');
           const title     = titleEl?.textContent?.trim()   || '';
           const snippet   = snippetEl?.textContent?.trim() || '';
 
-          if (title) found.push({ url: href, title, snippet });
+          if (title) found.push({ url: realUrl, title, snippet });
         });
 
         return found;
 
-      // Pass a SINGLE object — this is the fix for "Too many arguments"
-      }, { atsSite: ats.site, isSubdomain: ats.isSubdomain || false });
+      }, { atsSite: ats.site });
 
       log.info(`   → ${links.length} job links found on ${ats.name}`);
 
@@ -261,7 +265,7 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
             description: link.snippet,
             company:     extractCompany(link.url, ats),
             location,
-            source:      `${ats.name} via Google`,
+            source:      `${ats.name} via DuckDuckGo`,
             atsName:     ats.name,
             keyword,
             datePosted:  'Unknown',
@@ -285,7 +289,7 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
   jobs.forEach(j => { byPlatform[j.atsName] = (byPlatform[j.atsName] || 0) + 1; });
   const top = Object.entries(byPlatform).sort((a, b) => b[1] - a[1]).slice(0, 8);
 
-  console.log(`\n✅ ATS scraping complete. ${jobs.length} unique jobs found.`);
+  console.log(`\n✅ DuckDuckGo ATS scraping complete. ${jobs.length} unique jobs found.`);
   if (top.length) console.log(`   Top sources: ${top.map(([k, v]) => `${k}(${v})`).join(', ')}`);
 
   return jobs;
