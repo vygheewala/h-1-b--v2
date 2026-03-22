@@ -1,0 +1,9 @@
+{
+  "actorSpecification": 1,
+  "name": "h1b-job-hunter",
+  "title": "H1B-Friendly Job Hunter for F1 OPT Students (Google ATS Edition)",
+  "description": "Searches 40 ATS platforms via Google using your keywords. Checks H1B sponsorship history, E-Verify status, detects no-sponsorship language in job descriptions, and outputs a ranked CSV for F1 OPT/STEM OPT students.",
+  "version": "2.0",
+  "input": "./input_schema.json",
+  "dockerfile": "./Dockerfile"
+}
