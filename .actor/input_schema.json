@@ -1,0 +1,117 @@
+{
+  "title": "H1B Job Hunter — Inputs",
+  "description": "Search for H1B-sponsoring jobs using keywords scraped directly from company ATS platforms (Greenhouse, Lever, Workday, etc.) via Google.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+
+    "keywords": {
+      "title": "* Search Keywords (one per line)",
+      "type": "string",
+      "description": "These keywords are searched inside job descriptions on ATS platforms. Use terms that appear IN job descriptions — not just titles.\n\nExamples for Audit/Accounting: CPA, GAAP, internal audit, SOX, assurance\nExamples for Data: SQL, Python, Tableau, data analyst\nExamples for Finance: FP&A, financial modeling, CFA",
+      "editor": "textarea",
+      "default": "CPA\nGAAP\ninternal audit\nSOX"
+    },
+
+    "location": {
+      "title": "* Location",
+      "type": "string",
+      "description": "City + State (e.g. 'Chicago, IL') or 'United States' for nationwide. Leave blank to search globally.",
+      "editor": "textfield",
+      "default": "United States"
+    },
+
+    "timeFilter": {
+      "title": "* Time Filter — How Recent Should Jobs Be?",
+      "type": "string",
+      "description": "Filter job postings by how recently they were indexed by Google. 'Past 24 Hours' is recommended for daily runs.",
+      "editor": "select",
+      "enum": [
+        "All",
+        "Past Hour",
+        "Past 4 Hours",
+        "Past 8 Hours",
+        "Past 12 Hours",
+        "Past 24 Hours",
+        "Past 48 Hours",
+        "Past 72 Hours",
+        "Past Week",
+        "Past Month"
+      ],
+      "enumTitles": [
+        "All (no time filter)",
+        "Past Hour",
+        "Past 4 Hours",
+        "Past 8 Hours",
+        "Past 12 Hours",
+        "Past 24 Hours",
+        "Past 48 Hours",
+        "Past 72 Hours",
+        "Past Week",
+        "Past Month"
+      ],
+      "default": "Past 24 Hours"
+    },
+
+    "skills": {
+      "title": "* Your Skills (one per line) — for Skill Match Score",
+      "type": "string",
+      "description": "Your skills are matched against each job description to calculate your Skill Match Score (1–10). Be specific.",
+      "editor": "textarea",
+      "default": "CPA\nGAAP\nExcel\nSQL\nInternal audit\nSOX compliance\nFinancial reporting\nRisk assessment\nData analysis\nCommunication"
+    },
+
+    "resumeText": {
+      "title": "Resume Text (optional — paste full resume for better skill matching)",
+      "type": "string",
+      "editor": "textarea",
+      "default": ""
+    },
+
+    "optEndDate": {
+      "title": "OPT / STEM OPT End Date (YYYY-MM-DD)",
+      "type": "string",
+      "description": "Your EAD card expiration date. Used to calculate urgency of H1B timeline.",
+      "editor": "textfield",
+      "default": ""
+    },
+
+    "maxJobsPerKeyword": {
+      "title": "Max Jobs Per Keyword",
+      "type": "integer",
+      "description": "Max job links to collect per keyword across all ATS platforms. Each keyword searches 8 ATS sites. Recommended: 20–50.",
+      "editor": "number",
+      "default": 30,
+      "minimum": 5,
+      "maximum": 100
+    },
+
+    "excludeStaffingAgencies": {
+      "title": "Exclude Staffing / Consulting Agencies?",
+      "type": "boolean",
+      "description": "ATS results are mostly direct employers, but this adds an extra safety filter.",
+      "default": true
+    },
+
+    "minimumVisaScore": {
+      "title": "Minimum Visa Friendliness Score (1–10)",
+      "type": "integer",
+      "description": "Exclude jobs below this score. Jobs with explicit 'no sponsorship' language are always excluded regardless of this setting.",
+      "editor": "number",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10
+    },
+
+    "outputFormat": {
+      "title": "Output Format",
+      "type": "string",
+      "editor": "select",
+      "enum": ["csv", "json", "both"],
+      "enumTitles": ["CSV only", "JSON only", "Both CSV and JSON"],
+      "default": "both"
+    }
+
+  },
+  "required": ["keywords", "location", "timeFilter", "skills"]
+}
