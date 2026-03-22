@@ -117,7 +117,8 @@ export function buildSearchRequests(keywords, location, timeFilter) {
         ? `inurl:"${ats.site}" "${keyword}"${locationSuffix}`
         : `site:${ats.site} "${keyword}"${locationSuffix}`;
 
-      let googleUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=20`;
+      // gl=us forces US results, hl=en forces English, avoids EU cookie consent walls
+      let googleUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=20&gl=us&hl=en`;
       if (tbsParam) googleUrl += `&${tbsParam}`;
 
       requests.push({
@@ -180,16 +181,43 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
       searchsDone++;
       log.info(`[${searchsDone}/${requests.length}] Searching: ${query}`);
 
-      // Small polite delay — proxy rotation handles the 429 prevention,
-      // but we still wait briefly to be respectful
+      // Small polite delay
       const delayMs = randInt(1500, 3000);
       await wait(delayMs);
 
-      // Wait for Google results to load
+      // ── HANDLE GOOGLE CONSENT / COOKIE WALL ──────────────────
+      // Apify proxy IPs (often EU-routed) trigger Google's consent page.
+      // We detect it and click "Accept all" to get to the actual results.
       try {
-        await page.waitForSelector('#search, #rso, .g', { timeout: 12000 });
+        const consentSelectors = [
+          'button[aria-label="Accept all"]',
+          'button[aria-label="Agree to the use of cookies and other data for the purposes described"]',
+          '#L2AGLb',           // "Accept all" button ID on consent.google.com
+          'button.tHlp8d',     // alternative consent button class
+          'form[action*="consent"] button',
+        ];
+        for (const sel of consentSelectors) {
+          const btn = await page.$(sel);
+          if (btn) {
+            log.info(`   Consent page detected — clicking accept...`);
+            await btn.click();
+            await wait(2000);
+            break;
+          }
+        }
+      } catch { /* no consent page — continue normally */ }
+
+      // ── WAIT FOR GOOGLE SEARCH RESULTS ───────────────────────
+      try {
+        await page.waitForSelector('#search, #rso, .g, [data-async-context]', { timeout: 12000 });
       } catch {
-        log.warning(`   No results rendered for: ${query}`);
+        // Last resort: check if we're still on a consent/interstitial page
+        const url = page.url();
+        if (url.includes('consent.google') || url.includes('accounts.google')) {
+          log.warning(`   Blocked by Google consent/login page — skipping: ${query}`);
+        } else {
+          log.warning(`   No results rendered for: ${query}`);
+        }
         return;
       }
       await wait(1000);
