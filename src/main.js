@@ -58,13 +58,15 @@ await Actor.main(async () => {
   } = input || {};
 
   const keywordsArray = keywords.split('\n').map(k => k.trim()).filter(Boolean);
-  const skillsArray   = `${skills}\n${resumeText}`.split('\n').map(s => s.trim()).filter(Boolean);
+  const skillsArray = skills.split("\n").map(s => s.trim()).filter(Boolean);
+  const fullContextText = `${skills}\n${resumeText}`;
 
   console.log(`\n📋 CONFIGURATION`);
   console.log(`   Keywords:    ${keywordsArray.join(', ')}`);
   console.log(`   Location:    ${location}`);
   console.log(`   Time filter: ${timeFilter}`);
-  console.log(`   Skills:      ${skillsArray.slice(0, 5).join(', ')}${skillsArray.length > 5 ? '...' : ''}`);
+  console.log(`   Skills:      ${skillsArray.slice(0, 6).join(", ")}${skillsArray.length > 6 ? ` (+${skillsArray.length - 6} more)` : ""}`);
+  console.log(`   Resume:      ${resumeText.length > 0 ? resumeText.length + " chars provided" : "Not provided"}`);
   if (optEndDate) {
     const u = calculateUrgency(optEndDate);
     console.log(`\n⏰ OPT STATUS: ${u.urgencyLevel}`);
@@ -138,7 +140,7 @@ await Actor.main(async () => {
 
       // 6. Scoring
       const companySize  = h1bData.petitionCount >= 200 ? 'large' : h1bData.petitionCount >= 20 ? 'medium' : 'small';
-      const skillScore   = calculateSkillScore(skillsArray, job.title, descText);
+      const skillScore   = calculateSkillScore(skillsArray, job.title, descText + " " + fullContextText);
       const visaResult   = calculateVisaScore(h1bData, everify.isEVerify, agencyResult.isAgency, companySize);
       const finalVisa    = sponsorship.visaScoreOverride !== null ? sponsorship.visaScoreOverride : visaResult.score;
 
