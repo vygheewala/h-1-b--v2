@@ -264,46 +264,91 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
 }
 
 // ── URL → COMPANY NAME ────────────────────────────────────────
+// Words that appear in URL paths but are NOT company names
+const PATH_NOISE = new Set([
+  'jobs', 'job', 'careers', 'career', 'recruiting', 'recruitment',
+  'hiring', 'apply', 'application', 'boards', 'board', 'listing',
+  'listings', 'details', 'view', 'opening', 'openings', 'position',
+  'positions', 'en', 'us', 'de', 'fr', 'uk', 'au', 'ca', 'gb',
+  'external', 'internal', 'req', 'requisition', 'posting', 'postings',
+]);
+
 function extractCompany(url, ats) {
   try {
     const parsed   = new URL(url);
     const hostname = parsed.hostname;
-    const parts    = parsed.pathname.split('/').filter(Boolean);
+    const parts    = parsed.pathname.split('/').filter(p =>
+      p.length > 2 &&
+      !PATH_NOISE.has(p.toLowerCase()) &&
+      !/^\d+$/.test(p) &&           // skip pure numbers (job IDs)
+      !/^[a-f0-9-]{20,}$/.test(p)   // skip UUIDs
+    );
 
+    // SUBDOMAIN PATTERNS (jobs.stripe.com → "Stripe")
     if (ats.isSubdomain) {
-      const skip = new Set(['jobs', 'careers', 'talent', 'people', 'www', 'apply', 'boards']);
-      const company = hostname.split('.').find(p => !skip.has(p.toLowerCase()) && p.length > 2)
+      const skipHost = new Set(['jobs', 'careers', 'talent', 'people', 'www', 'apply', 'boards']);
+      const company = hostname.split('.')
+        .find(p => !skipHost.has(p.toLowerCase()) && p.length > 2 && p !== 'com' && p !== 'io')
         || hostname.split('.')[0];
       return titleCase(company);
     }
 
     switch (ats.site) {
-      case 'greenhouse.io':        return titleCase(parts[0] || hostname);
-      case 'lever.co':             return titleCase(parts[0] || hostname);
-      case 'myworkdayjobs.com':    return titleCase(hostname.split('.')[0]);
-      case 'jobs.ashbyhq.com':     return titleCase(parts[0] || hostname);
+      // Subdomain-based: company name is the first subdomain
+      case 'myworkdayjobs.com':  return titleCase(hostname.split('.')[0]);
+      case 'recruitee.com':      return titleCase(hostname.split('.')[0]);
+      case 'teamtailor.com':     return titleCase(hostname.split('.')[0]);
+      case 'pinpointhq.com':     return titleCase(hostname.split('.')[0]);
+      case 'rippling.com':       return titleCase(hostname.split('.')[0]);
+
+      // Path-based: company name is first meaningful path segment
+      case 'greenhouse.io':      return titleCase(parts[0] || hostname);
+      case 'lever.co':           return titleCase(parts[0] || hostname);
+      case 'jobs.ashbyhq.com':   return titleCase(parts[0] || hostname);
       case 'jobs.smartrecruiters.com': return titleCase(parts[0] || hostname);
-      case 'app.jazz.co':          return titleCase(parts[0] || hostname);
-      case 'apply.workable.com':   return titleCase(parts[0] || hostname);
-      case 'recruitee.com':        return titleCase(hostname.split('.')[0]);
-      case 'teamtailor.com':       return titleCase(hostname.split('.')[0]);
-      case 'pinpointhq.com':       return titleCase(hostname.split('.')[0]);
-      case 'app.breezy.hr':       return titleCase(parts[1] || parts[0] || hostname);
-      case 'wellfound.com':        return titleCase(parts[1] || parts[0] || hostname);
-      case 'workatastartup.com':   return titleCase(parts[1] || parts[0] || hostname);
-      case 'builtin.com':          return titleCase(parts[1] || parts[0] || hostname);
-      case 'linkedin.com/jobs': {
-        if (parts[2]) {
-          const m = parts[2].match(/^(.*?)-\d+$/);
-          return m ? titleCase(m[1].replace(/-/g, ' ')) : titleCase(parts[2]);
+      case 'app.jazz.co':        return titleCase(parts[0] || hostname);
+      case 'apply.workable.com': return titleCase(parts[0] || hostname);
+      case 'app.breezy.hr':     return titleCase(parts[0] || hostname);
+      case 'wellfound.com':      return titleCase(parts[1] || parts[0] || hostname);
+      case 'workatastartup.com': return titleCase(parts[1] || parts[0] || hostname);
+
+      // Paylocity: recruiting.paylocity.com/Recruiting/Jobs/Details/ID/COMPANY
+      // The company name is usually in the job title, not the URL
+      // Fall back to 'Unknown' and let the title provide context
+      case 'recruiting.paylocity.com': return parts[2] || 'Unknown';
+
+      // Builtin: builtin.com/company/COMPANY-NAME/jobs/TITLE-ID
+      // Path is: ["company", "company-name", "jobs", "job-title-123"]
+      case 'builtin.com': {
+        const compIdx = parsed.pathname.toLowerCase().indexOf('/company/');
+        if (compIdx !== -1) {
+          const afterCompany = parsed.pathname.slice(compIdx + 9).split('/')[0];
+          if (afterCompany && !PATH_NOISE.has(afterCompany.toLowerCase())) {
+            return titleCase(afterCompany);
+          }
         }
-        return 'LinkedIn Job';
+        // Fallback: jobs/CITY/TITLE/ID — use parts[1] but only if it looks like a company
+        return parts[0]?.length > 3 ? titleCase(parts[0]) : 'Unknown';
       }
+
+      // LinkedIn: job title slug contains company — too unreliable, return Unknown
+      case 'linkedin.com/jobs': return 'Unknown';
+
       default: return titleCase(parts[0] || hostname.split('.')[0]);
     }
   } catch {
     return 'Unknown';
   }
+}
+
+// Filter out jobs where company extraction clearly failed
+export function isValidCompany(name) {
+  if (!name || name === 'Unknown') return false;
+  const n = name.toLowerCase();
+  // Reject if the "company" is just a noise word, 2-letter locale code, or looks like a job title
+  if (PATH_NOISE.has(n)) return false;
+  if (n.length <= 2) return false;
+  return true;
 }
 
 function cleanTitle(raw, atsName) {
