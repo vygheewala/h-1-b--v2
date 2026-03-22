@@ -205,71 +205,72 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
       await wait(delayMs);
 
       // ── WAIT FOR DUCKDUCKGO LITE RESULTS ─────────────────────
-      // lite.duckduckgo.com always returns a simple HTML table.
-      // Results are in <tr> rows — the first column has the link,
-      // the second has the snippet. No JS, no redirects, always consistent.
+      // lite.duckduckgo.com HTML structure:
+      //   <div id="links">
+      //     <div class="result results_links web-result">
+      //       <h2 class="result__title">
+      //         <a class="result__a" href="/lite/?uddg=ENCODED_REAL_URL">Title</a>
+      //       </h2>
+      //       <div class="result__snippet">description</div>
+      //     </div>
+      //   </div>
       try {
-        await page.waitForSelector('table.results', { timeout: 12000 });
+        await page.waitForSelector('#links, .results, .result', { timeout: 12000 });
       } catch {
-        // Check if it's a "no results" page vs a load failure
         const bodyText = await page.evaluate(() => document.body?.innerText || '');
-        if (bodyText.toLowerCase().includes('no results')) {
+        if (bodyText.toLowerCase().includes('no results') || bodyText.toLowerCase().includes('no result')) {
           log.info(`   No results (DDG found nothing) for: ${query}`);
         } else {
-          log.warning(`   No results for: ${query}`);
+          // On first failure, log the page HTML snippet to help diagnose selector issues
+          if (searchsDone <= 3) {
+            const htmlSnippet = await page.evaluate(() =>
+              document.body?.innerHTML?.slice(0, 800) || 'empty'
+            );
+            log.warning(`   No results for: ${query}`);
+            log.info(`   [DEBUG] Page HTML snippet: ${htmlSnippet.replace(/\n/g, ' ').slice(0, 500)}`);
+          } else {
+            log.warning(`   No results for: ${query}`);
+          }
         }
         return;
       }
       await wait(300);
 
-      // ── EXTRACT JOB LINKS FROM DDG LITE RESULTS ──────────────
-      // lite.duckduckgo.com structure:
-      //   <table class="results">
-      //     <tr>
-      //       <td class="result-link">  ← title + URL
-      //         <a href="ACTUAL_URL">Title</a>
-      //       </td>
-      //       <td class="result-snippet">  ← description text
-      //     </tr>
-      //   ...
+      // ── EXTRACT JOB LINKS ─────────────────────────────────────
       const links = await page.evaluate(({ atsSite }) => {
         const found = [];
 
-        // Each result row in the lite DDG table
-        const rows = document.querySelectorAll('table.results tr');
+        // Each result is a div with class "result"
+        const resultDivs = document.querySelectorAll('.result, .results_links');
 
-        rows.forEach((row) => {
-          // Title + URL cell
-          const linkCell    = row.querySelector('.result-link, td:first-child');
-          const snippetCell = row.querySelector('.result-snippet, td:last-child');
-
-          if (!linkCell) return;
-
-          const anchor = linkCell.querySelector('a');
+        resultDivs.forEach((div) => {
+          // Title link — class is "result__a" on lite DDG
+          const anchor = div.querySelector('a.result__a, h2 a, .result__title a');
           if (!anchor) return;
 
           const href = anchor.getAttribute('href') || '';
 
-          // lite DDG wraps real URLs in /lite/? redirect — unwrap it
+          // lite DDG wraps real destination in /lite/?uddg= parameter
           let realUrl = href;
-          if (href.startsWith('/lite/?')) {
+          if (href.includes('uddg=')) {
             try {
-              const params = new URLSearchParams(href.replace('/lite/?', ''));
+              // href may be "/lite/?uddg=..." or full URL
+              const searchStr = href.includes('?') ? href.split('?')[1] : href;
+              const params = new URLSearchParams(searchStr);
               const uddg = params.get('uddg');
               if (uddg) realUrl = decodeURIComponent(uddg);
-            } catch { /* keep original */ }
-          } else if (href.includes('duckduckgo.com/l/?')) {
-            try {
-              const uddg = new URL('https://duckduckgo.com' + href).searchParams.get('uddg');
-              if (uddg) realUrl = decodeURIComponent(uddg);
-            } catch { /* keep original */ }
+            } catch { /* keep original href */ }
+          } else if (href.startsWith('http')) {
+            realUrl = href; // already a real URL
+          } else {
+            return; // skip relative paths that aren't DDG redirects
           }
 
           if (!realUrl.startsWith('http')) return;
           if (!realUrl.includes(atsSite)) return;
 
           const title   = anchor.textContent?.trim() || '';
-          const snippet = snippetCell?.textContent?.trim() || '';
+          const snippet = div.querySelector('.result__snippet')?.textContent?.trim() || '';
 
           if (title) found.push({ url: realUrl, title, snippet });
         });
