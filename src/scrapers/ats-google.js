@@ -1,79 +1,70 @@
 /**
  * ============================================================
- * GOOGLE ATS SCRAPER — v3 (Full Brian's Job Search platform list)
+ * GOOGLE ATS SCRAPER — v4
  * ============================================================
  *
- * Searches Google using site: operator across all major ATS
- * platforms and job boards. Inspired by Brian's Job Search.
+ * FIXES FROM v3:
+ * 1. page.evaluate() now receives a single object argument
+ *    (Playwright only allows 1 argument — wrapping fixes the
+ *    "Too many arguments" error)
  *
- * SOURCES: 40 platforms total
- *   - ATS platforms (direct employer job postings)
- *   - Job boards (LinkedIn, Glassdoor, Builtin, Wellfound, etc.)
- *   - Subdomain patterns (jobs.*, careers.*, talent.*, people.*)
+ * 2. Random 4–10 second delay between every Google search
+ *    prevents 429 rate-limit blocks. Google allows ~8–10
+ *    automated searches/minute before blocking cloud IPs.
  *
- * TIME FILTER: Maps dropdown selection to Google's tbs parameter.
- * NO "remote" SUFFIX — returns onsite, hybrid, and remote jobs.
+ * 3. Randomised User-Agent per request to further reduce
+ *    Google's bot detection confidence.
  *
- * QUERY FORMAT:
- *   site:greenhouse.io "CPA" Chicago, IL &tbs=qdr:d
+ * SOURCES: 40 platforms (Brian's full list + Taleo)
  */
 
 import { PlaywrightCrawler } from 'crawlee';
 
-// ── ALL ATS PLATFORMS & JOB BOARDS ───────────────────────────
-// Keeping taleo.net even though it's not in Brian's list —
-// many large enterprises (Oracle, IBM, gov contractors) use it.
+// ── ATS PLATFORMS & JOB BOARDS ────────────────────────────────
 export const ATS_SITES = [
-  // ── CORE ATS (from Brian's list) ──────────────────────────
-  { site: 'greenhouse.io',                name: 'Greenhouse'            },
-  { site: 'lever.co',                     name: 'Lever'                 },
-  { site: 'jobs.ashbyhq.com',             name: 'Ashby'                 },
-  { site: 'remoterocketship.com',         name: 'Remote Rocketship'     },
-  { site: 'pinpointhq.com',               name: 'Pinpoint'              },
-  { site: 'recruiting.paylocity.com',     name: 'Paylocity'             },
-  { site: 'keka.com',                     name: 'Keka'                  },
-  { site: 'apply.workable.com',           name: 'Workable'              },
-  { site: 'app.breezy.hr',               name: 'BreezyHR'              },
-  { site: 'wellfound.com',               name: 'Wellfound'             },
-  { site: 'workatastartup.com',           name: 'Y Combinator'          },
-  { site: 'myworkdayjobs.com',            name: 'Workday Jobs'          },
-  { site: 'recruitee.com',               name: 'Recruitee'             },
-  { site: 'rippling.com',                name: 'Rippling'              },
-  { site: 'gusto.com',                   name: 'Gusto'                 },
-  { site: 'careerpuck.com',              name: 'CareerPuck'            },
-  { site: 'teamtailor.com',              name: 'Teamtailor'            },
-  { site: 'jobs.smartrecruiters.com',     name: 'SmartRecruiters'       },
-  { site: 'talentreef.com',              name: 'TalentReef'            },
-  { site: 'homerun.co',                  name: 'Homerun'               },
-  { site: 'gem.com',                     name: 'Gem'                   },
-  { site: 'trakstar.com',                name: 'Trakstar'              },
-  { site: 'catsone.com',                 name: 'CATS'                  },
-  { site: 'app.jazz.co',                 name: 'JazzHR'                },
-  { site: 'jobvite.com',                 name: 'Jobvite'               },
-  { site: 'icims.com',                   name: 'iCIMS'                 },
-  { site: 'dover.com',                   name: 'Dover'                 },
-  { site: 'notion.so',                   name: 'Notion'                },
-  { site: 'builtin.com',                 name: 'Builtin'               },
-  { site: 'jobs.adp.com',               name: 'ADP'                   },
-  { site: 'linkedin.com/jobs',           name: 'LinkedIn'              },
-  { site: 'glassdoor.com',              name: 'Glassdoor'             },
-  { site: 'factorialhr.com',             name: 'Factorial'             },
-  { site: 'trinet.com',                  name: 'TriNet Hire'           },
-  { site: 'oracle.com/careers',          name: 'Oracle Cloud'          },
-
-  // ── SUBDOMAIN PATTERNS ────────────────────────────────────
-  // Brian uses these to catch company-specific career microsites
-  // e.g. jobs.stripe.com, careers.shopify.com, talent.spotify.com
-  { site: 'jobs.',                       name: 'Jobs Subdomain',    isSubdomain: true },
-  { site: 'careers.',                    name: 'Careers Pages',     isSubdomain: true },
-  { site: 'people.',                     name: 'People Subdomain',  isSubdomain: true },
-  { site: 'talent.',                     name: 'Talent Subdomain',  isSubdomain: true },
-
-  // ── KEPT FROM OUR ORIGINAL LIST (not in Brian's) ─────────
-  { site: 'taleo.net',                   name: 'Taleo'                 },
+  { site: 'greenhouse.io',                name: 'Greenhouse'           },
+  { site: 'lever.co',                     name: 'Lever'                },
+  { site: 'jobs.ashbyhq.com',             name: 'Ashby'                },
+  { site: 'remoterocketship.com',         name: 'Remote Rocketship'    },
+  { site: 'pinpointhq.com',               name: 'Pinpoint'             },
+  { site: 'recruiting.paylocity.com',     name: 'Paylocity'            },
+  { site: 'keka.com',                     name: 'Keka'                 },
+  { site: 'apply.workable.com',           name: 'Workable'             },
+  { site: 'app.breezy.hr',               name: 'BreezyHR'             },
+  { site: 'wellfound.com',               name: 'Wellfound'            },
+  { site: 'workatastartup.com',           name: 'Y Combinator'         },
+  { site: 'myworkdayjobs.com',            name: 'Workday Jobs'         },
+  { site: 'recruitee.com',               name: 'Recruitee'            },
+  { site: 'rippling.com',                name: 'Rippling'             },
+  { site: 'gusto.com',                   name: 'Gusto'                },
+  { site: 'careerpuck.com',              name: 'CareerPuck'           },
+  { site: 'teamtailor.com',              name: 'Teamtailor'           },
+  { site: 'jobs.smartrecruiters.com',     name: 'SmartRecruiters'      },
+  { site: 'talentreef.com',              name: 'TalentReef'           },
+  { site: 'homerun.co',                  name: 'Homerun'              },
+  { site: 'gem.com',                     name: 'Gem'                  },
+  { site: 'trakstar.com',                name: 'Trakstar'             },
+  { site: 'catsone.com',                 name: 'CATS'                 },
+  { site: 'app.jazz.co',                 name: 'JazzHR'               },
+  { site: 'jobvite.com',                 name: 'Jobvite'              },
+  { site: 'icims.com',                   name: 'iCIMS'                },
+  { site: 'dover.com',                   name: 'Dover'                },
+  { site: 'notion.so',                   name: 'Notion'               },
+  { site: 'builtin.com',                 name: 'Builtin'              },
+  { site: 'jobs.adp.com',               name: 'ADP'                  },
+  { site: 'linkedin.com/jobs',           name: 'LinkedIn'             },
+  { site: 'glassdoor.com',              name: 'Glassdoor'            },
+  { site: 'factorialhr.com',             name: 'Factorial'            },
+  { site: 'trinet.com',                  name: 'TriNet Hire'          },
+  { site: 'oracle.com/careers',          name: 'Oracle Cloud'         },
+  { site: 'jobs.',      name: 'Jobs Subdomain',   isSubdomain: true   },
+  { site: 'careers.',   name: 'Careers Pages',    isSubdomain: true   },
+  { site: 'people.',    name: 'People Subdomain',  isSubdomain: true  },
+  { site: 'talent.',    name: 'Talent Subdomain',  isSubdomain: true  },
+  { site: 'taleo.net',                   name: 'Taleo'                },
 ];
 
-// ── TIME FILTER → GOOGLE TBS PARAMETER ───────────────────────
+// ── TIME FILTER → GOOGLE TBS ──────────────────────────────────
 const TIME_FILTER_MAP = {
   'All':          '',
   'Past Hour':    'tbs=qdr:h',
@@ -87,24 +78,32 @@ const TIME_FILTER_MAP = {
   'Past Month':   'tbs=qdr:m',
 };
 
-/**
- * Build all Google search request objects.
- * One request per: keyword × ATS platform.
- *
- * For subdomain patterns (jobs.*, careers.*), we use
- * Google's inurl: operator instead of site: because
- * site:jobs. is not valid — Google needs a full domain.
- *
- * @param {string[]} keywords   - From INPUT (e.g. ["CPA", "GAAP"])
- * @param {string}   location   - From INPUT (e.g. "Chicago, IL")
- * @param {string}   timeFilter - From INPUT dropdown
- * @returns {Array}  Array of crawler request objects
- */
+// ── RANDOM USER AGENTS ────────────────────────────────────────
+// Rotate between real browser UA strings to reduce bot detection
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+];
+
+// ── HELPERS ───────────────────────────────────────────────────
+
+// Random integer between min and max (inclusive)
+const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+// Pause execution for ms milliseconds
+const wait = (ms) => new Promise(res => setTimeout(res, ms));
+
+// Pick a random item from an array
+const randItem = (arr) => arr[randInt(0, arr.length - 1)];
+
+// ── BUILD SEARCH REQUESTS ─────────────────────────────────────
 export function buildSearchRequests(keywords, location, timeFilter) {
   const tbsParam = TIME_FILTER_MAP[timeFilter] || '';
   const requests = [];
 
-  // Location suffix — skip for US-wide searches to maximise results
   const locationSuffix = location &&
     location.toLowerCase() !== 'united states' &&
     location.trim() !== ''
@@ -113,17 +112,9 @@ export function buildSearchRequests(keywords, location, timeFilter) {
 
   for (const keyword of keywords) {
     for (const ats of ATS_SITES) {
-
-      let query;
-
-      if (ats.isSubdomain) {
-        // Subdomain pattern: use inurl: instead of site:
-        // e.g. inurl:"jobs." "CPA" Chicago, IL
-        query = `inurl:"${ats.site}" "${keyword}"${locationSuffix}`;
-      } else {
-        // Standard: site:greenhouse.io "CPA" Chicago, IL
-        query = `site:${ats.site} "${keyword}"${locationSuffix}`;
-      }
+      const query = ats.isSubdomain
+        ? `inurl:"${ats.site}" "${keyword}"${locationSuffix}`
+        : `site:${ats.site} "${keyword}"${locationSuffix}`;
 
       let googleUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=20`;
       if (tbsParam) googleUrl += `&${tbsParam}`;
@@ -139,65 +130,70 @@ export function buildSearchRequests(keywords, location, timeFilter) {
   return requests;
 }
 
-/**
- * Main scraper — runs all Google ATS searches and returns
- * a deduplicated flat list of job objects.
- *
- * @param {string[]} keywords
- * @param {string}   location
- * @param {string}   timeFilter
- * @param {number}   maxPerKeyword
- * @returns {Promise<Array>}
- */
+// ── MAIN SCRAPER ──────────────────────────────────────────────
 export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeyword = 30) {
-  console.log(`\n🔍 Starting Google ATS scraper (v3 — ${ATS_SITES.length} platforms)...`);
+  console.log(`\n🔍 Starting Google ATS scraper (v4 — ${ATS_SITES.length} platforms)...`);
   console.log(`   Keywords:    ${keywords.join(', ')}`);
   console.log(`   Location:    ${location || 'Worldwide'}`);
-  console.log(`   Time filter: ${timeFilter} → ${TIME_FILTER_MAP[timeFilter] || 'no tbs'}`);
-  console.log(`   Platforms:   ${ATS_SITES.length} (${ATS_SITES.filter(a => !a.isSubdomain).length} ATS + ${ATS_SITES.filter(a => a.isSubdomain).length} subdomain patterns + Taleo)\n`);
+  console.log(`   Time filter: ${timeFilter} → ${TIME_FILTER_MAP[timeFilter] || 'no filter'}`);
+  console.log(`   Total searches: ${keywords.length} keywords × ${ATS_SITES.length} platforms = ${keywords.length * ATS_SITES.length}`);
+  console.log(`   Delay between searches: 4–10 seconds (prevents Google 429 blocks)\n`);
 
-  const requests = buildSearchRequests(keywords, location, timeFilter);
-  console.log(`   Total Google searches: ${requests.length} (${keywords.length} keywords × ${ATS_SITES.length} platforms)`);
-
-  // Deduplication map: jobUrl → job object
-  const jobMap = new Map();
-
-  // Per-keyword job count tracker
-  const keywordCounts = {};
+  const requests    = buildSearchRequests(keywords, location, timeFilter);
+  const jobMap      = new Map();   // URL → job (deduplication)
+  const kCounts     = {};          // keyword → count (per-keyword limit)
+  let   searchsDone = 0;
 
   const crawler = new PlaywrightCrawler({
-    maxConcurrency: 1,            // polite — one Google search at a time
+    maxConcurrency: 1,             // MUST be 1 — concurrent Google searches = instant 429
     navigationTimeoutSecs: 30,
     maxRequestsPerCrawl: requests.length,
 
+    // Set a random User-Agent before each navigation
+    preNavigationHooks: [
+      async ({ page }) => {
+        await page.setExtraHTTPHeaders({
+          'User-Agent': randItem(USER_AGENTS),
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        });
+      },
+    ],
+
     async requestHandler({ page, request, log }) {
       const { keyword, ats, query } = request.userData;
-      log.info(`Searching: ${query}`);
+      searchsDone++;
+      log.info(`[${searchsDone}/${requests.length}] Searching: ${query}`);
 
-      // Wait for Google results container
+      // ── RANDOM DELAY before every search ─────────────────────
+      // 4–10 seconds. Google typically allows ~8 req/min from
+      // a single IP before issuing a 429. This keeps us under that.
+      const delayMs = randInt(4000, 10000);
+      log.info(`   Waiting ${(delayMs / 1000).toFixed(1)}s before request...`);
+      await wait(delayMs);
+
+      // Wait for Google results to load
       try {
         await page.waitForSelector('#search, #rso, .g', { timeout: 12000 });
       } catch {
-        log.warning(`No Google results for: ${query}`);
+        log.warning(`   No results rendered for: ${query}`);
         return;
       }
-      await page.waitForTimeout(1200);
+      await wait(1000);
 
-      // ── EXTRACT LINKS FROM GOOGLE RESULTS ──────────────────
-      const links = await page.evaluate((atsSite, isSubdomain) => {
+      // ── EXTRACT JOB LINKS ─────────────────────────────────────
+      // FIX: page.evaluate() only accepts ONE argument.
+      // We wrap atsSite + isSubdomain into a single object.
+      const links = await page.evaluate(({ atsSite, isSubdomain }) => {
         const found = [];
 
         document.querySelectorAll('div.g, div[data-hveid]').forEach((div) => {
-          const anchor = div.querySelector('a[href]');
-          const href   = anchor?.getAttribute('href') || '';
+          const anchor  = div.querySelector('a[href]');
+          const href    = anchor?.getAttribute('href') || '';
           if (!href.startsWith('http')) return;
 
-          // For subdomain patterns, check URL contains the subdomain keyword
-          const matches = isSubdomain
-            ? href.includes(atsSite)
-            : href.includes(atsSite);
-
-          if (!matches) return;
+          // Match: URL contains the ATS site string
+          if (!href.includes(atsSite)) return;
 
           const titleEl   = div.querySelector('h3');
           const snippetEl = div.querySelector('.VwiC3b, .lyLwlc, [data-sncf]');
@@ -208,15 +204,15 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
         });
 
         return found;
-      }, ats.site, ats.isSubdomain || false);
 
-      log.info(`  → ${links.length} results | "${keyword}" on ${ats.name}`);
+      // Pass a SINGLE object — this is the fix for "Too many arguments"
+      }, { atsSite: ats.site, isSubdomain: ats.isSubdomain || false });
 
-      // ── ADD TO JOB MAP (deduplicated) ───────────────────────
+      log.info(`   → ${links.length} job links found on ${ats.name}`);
+
+      // Add to deduplication map
       for (const link of links) {
-        const kCount = keywordCounts[keyword] || 0;
-        if (kCount >= maxPerKeyword) break;
-
+        if ((kCounts[keyword] || 0) >= maxPerKeyword) break;
         if (!jobMap.has(link.url)) {
           jobMap.set(link.url, {
             jobUrl:      link.url,
@@ -229,37 +225,74 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
             keyword,
             datePosted:  'Unknown',
           });
-          keywordCounts[keyword] = kCount + 1;
+          kCounts[keyword] = (kCounts[keyword] || 0) + 1;
         }
       }
     },
 
     failedRequestHandler({ request, log }) {
-      // Non-fatal — just log and continue with remaining searches
-      log.warning(`Search skipped: ${request.userData?.query}`);
+      log.warning(`Skipped (will continue): ${request.userData?.query}`);
     },
   });
 
   await crawler.run(requests);
 
   const jobs = Array.from(jobMap.values());
-  console.log(`\n✅ ATS scraping complete. ${jobs.length} unique job listings found.`);
 
   // Print breakdown by platform
   const byPlatform = {};
   jobs.forEach(j => { byPlatform[j.atsName] = (byPlatform[j.atsName] || 0) + 1; });
-  const topPlatforms = Object.entries(byPlatform).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  console.log(`   Top sources: ${topPlatforms.map(([k, v]) => `${k}(${v})`).join(', ')}`);
+  const top = Object.entries(byPlatform).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  console.log(`\n✅ ATS scraping complete. ${jobs.length} unique jobs found.`);
+  if (top.length) console.log(`   Top sources: ${top.map(([k, v]) => `${k}(${v})`).join(', ')}`);
 
   return jobs;
 }
 
-// ── HELPERS ───────────────────────────────────────────────────
+// ── URL → COMPANY NAME ────────────────────────────────────────
+function extractCompany(url, ats) {
+  try {
+    const parsed   = new URL(url);
+    const hostname = parsed.hostname;
+    const parts    = parsed.pathname.split('/').filter(Boolean);
 
-/**
- * Clean noisy Google title text.
- * Google often appends "- Greenhouse", "| Lever", "Jobs" etc.
- */
+    if (ats.isSubdomain) {
+      const skip = new Set(['jobs', 'careers', 'talent', 'people', 'www', 'apply', 'boards']);
+      const company = hostname.split('.').find(p => !skip.has(p.toLowerCase()) && p.length > 2)
+        || hostname.split('.')[0];
+      return titleCase(company);
+    }
+
+    switch (ats.site) {
+      case 'greenhouse.io':        return titleCase(parts[0] || hostname);
+      case 'lever.co':             return titleCase(parts[0] || hostname);
+      case 'myworkdayjobs.com':    return titleCase(hostname.split('.')[0]);
+      case 'jobs.ashbyhq.com':     return titleCase(parts[0] || hostname);
+      case 'jobs.smartrecruiters.com': return titleCase(parts[0] || hostname);
+      case 'app.jazz.co':          return titleCase(parts[0] || hostname);
+      case 'apply.workable.com':   return titleCase(parts[0] || hostname);
+      case 'recruitee.com':        return titleCase(hostname.split('.')[0]);
+      case 'teamtailor.com':       return titleCase(hostname.split('.')[0]);
+      case 'pinpointhq.com':       return titleCase(hostname.split('.')[0]);
+      case 'app.breezy.hr':       return titleCase(parts[1] || parts[0] || hostname);
+      case 'wellfound.com':        return titleCase(parts[1] || parts[0] || hostname);
+      case 'workatastartup.com':   return titleCase(parts[1] || parts[0] || hostname);
+      case 'builtin.com':          return titleCase(parts[1] || parts[0] || hostname);
+      case 'linkedin.com/jobs': {
+        if (parts[2]) {
+          const m = parts[2].match(/^(.*?)-\d+$/);
+          return m ? titleCase(m[1].replace(/-/g, ' ')) : titleCase(parts[2]);
+        }
+        return 'LinkedIn Job';
+      }
+      default: return titleCase(parts[0] || hostname.split('.')[0]);
+    }
+  } catch {
+    return 'Unknown';
+  }
+}
+
 function cleanTitle(raw, atsName) {
   return raw
     .replace(new RegExp(`\\s*[-–|]\\s*${atsName}\\s*$`, 'i'), '')
@@ -267,123 +300,6 @@ function cleanTitle(raw, atsName) {
     .trim();
 }
 
-/**
- * Extract a human-readable company name from the ATS job URL.
- *
- * Examples:
- *   boards.greenhouse.io/stripe/jobs/123       → "Stripe"
- *   jobs.lever.co/airbnb/abc-123               → "Airbnb"
- *   amazon.myworkdayjobs.com/en-US/...         → "Amazon"
- *   jobs.ashbyhq.com/openai/job-id             → "Openai"
- *   jobs.stripe.com/listing/123                → "Stripe" (subdomain)
- *   careers.shopify.com/en/jobs/123            → "Shopify" (subdomain)
- *   app.jazz.co/companyname/jobs/123           → "Companyname"
- *   recruiting.paylocity.com/recruiting/jobs/  → host fallback
- */
-function extractCompany(url, ats) {
-  try {
-    const parsed   = new URL(url);
-    const hostname = parsed.hostname;                           // e.g. "boards.greenhouse.io"
-    const parts    = parsed.pathname.split('/').filter(Boolean);
-
-    // Subdomain patterns: company name is the second-level domain
-    // jobs.stripe.com → "stripe"
-    // careers.shopify.com → "shopify"
-    if (ats.isSubdomain) {
-      const hostParts = hostname.split('.');
-      // Remove common prefixes: jobs, careers, talent, people, www
-      const skip = new Set(['jobs', 'careers', 'talent', 'people', 'www', 'apply', 'boards']);
-      const company = hostParts.find(p => !skip.has(p.toLowerCase()) && p.length > 2) || hostParts[0];
-      return titleCase(company);
-    }
-
-    switch (ats.site) {
-      case 'greenhouse.io':
-        // boards.greenhouse.io/COMPANY/jobs/ID
-        return titleCase(parts[0] || hostname);
-
-      case 'lever.co':
-        // jobs.lever.co/COMPANY/job-id
-        return titleCase(parts[0] || hostname);
-
-      case 'myworkdayjobs.com':
-        // COMPANY.myworkdayjobs.com
-        return titleCase(hostname.split('.')[0]);
-
-      case 'jobs.ashbyhq.com':
-        // jobs.ashbyhq.com/COMPANY/job-id
-        return titleCase(parts[0] || hostname);
-
-      case 'jobs.smartrecruiters.com':
-        // jobs.smartrecruiters.com/COMPANY/job-id
-        return titleCase(parts[0] || hostname);
-
-      case 'app.jazz.co':
-        // app.jazz.co/COMPANY/jobs/ID
-        return titleCase(parts[0] || hostname);
-
-      case 'apply.workable.com':
-        // apply.workable.com/COMPANY/j/ID
-        return titleCase(parts[0] || hostname);
-
-      case 'recruitee.com':
-        // COMPANY.recruitee.com/o/job-title
-        return titleCase(hostname.split('.')[0]);
-
-      case 'teamtailor.com':
-        // COMPANY.teamtailor.com/jobs/ID
-        return titleCase(hostname.split('.')[0]);
-
-      case 'pinpointhq.com':
-        // COMPANY.pinpointhq.com/jobs/ID
-        return titleCase(hostname.split('.')[0]);
-
-      case 'app.breezy.hr':
-        // app.breezy.hr/p/COMPANY
-        return titleCase(parts[1] || parts[0] || hostname);
-
-      case 'wellfound.com':
-        // wellfound.com/company/COMPANY/jobs/ID
-        return titleCase(parts[1] || parts[0] || hostname);
-
-      case 'workatastartup.com':
-        // workatastartup.com/companies/COMPANY
-        return titleCase(parts[1] || parts[0] || hostname);
-
-      case 'builtin.com':
-        // builtin.com/job/CITY/ROLE/ID or builtin.com/company/COMPANY
-        return titleCase(parts[1] || parts[0] || hostname);
-
-      case 'linkedin.com/jobs':
-        // linkedin.com/jobs/view/ROLE-AT-COMPANY-ID
-        // Company name is embedded in the slug — extract before the last dash-number
-        if (parts[2]) {
-          const slug = parts[2];
-          const match = slug.match(/^(.*?)-\d+$/);
-          return match ? titleCase(match[1].replace(/-/g, ' ')) : titleCase(slug);
-        }
-        return 'LinkedIn Job';
-
-      case 'glassdoor.com':
-        // glassdoor.com/job-listing/ROLE-AT-COMPANY-...
-        return titleCase(parts[1]?.replace(/-/g, ' ') || 'Glassdoor Job');
-
-      default:
-        // Generic fallback: try first path segment, then subdomain
-        return titleCase(parts[0] || hostname.split('.')[0]);
-    }
-  } catch {
-    return 'Unknown';
-  }
-}
-
-/**
- * Convert "portage-point-partners" → "Portage Point Partners"
- * Handles hyphens, underscores, and plain lowercase.
- */
 function titleCase(str) {
-  return str
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
-    .trim();
+  return str.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
 }
