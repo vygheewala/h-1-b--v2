@@ -19,6 +19,7 @@
  */
 
 import { PlaywrightCrawler } from 'crawlee';
+import { Actor } from 'apify';
 
 // ── ATS PLATFORMS & JOB BOARDS ────────────────────────────────
 export const ATS_SITES = [
@@ -144,10 +145,24 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
   const kCounts     = {};          // keyword → count (per-keyword limit)
   let   searchsDone = 0;
 
+  // ── APIFY PROXY CONFIGURATION ───────────────────────────────
+  // This rotates the IP address for every Google search request.
+  // Google rate-limits by IP — rotating IPs eliminates 429 errors.
+  // Apify's datacenter proxies are included in the free plan.
+  // If proxy creation fails (e.g. running locally), we continue without it.
+  let proxyConfiguration;
+  try {
+    proxyConfiguration = await Actor.createProxyConfiguration();
+    console.log('   ✅ Apify proxy enabled — IP rotation active');
+  } catch {
+    console.log('   ⚠️  Proxy unavailable — running without IP rotation');
+  }
+
   const crawler = new PlaywrightCrawler({
-    maxConcurrency: 1,             // MUST be 1 — concurrent Google searches = instant 429
+    maxConcurrency: 1,             // one search at a time — still needed for orderly execution
     navigationTimeoutSecs: 30,
     maxRequestsPerCrawl: requests.length,
+    proxyConfiguration,            // rotate IP per request — prevents Google 429
 
     // Set a random User-Agent before each navigation
     preNavigationHooks: [
@@ -165,11 +180,9 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
       searchsDone++;
       log.info(`[${searchsDone}/${requests.length}] Searching: ${query}`);
 
-      // ── RANDOM DELAY before every search ─────────────────────
-      // 4–10 seconds. Google typically allows ~8 req/min from
-      // a single IP before issuing a 429. This keeps us under that.
-      const delayMs = randInt(4000, 10000);
-      log.info(`   Waiting ${(delayMs / 1000).toFixed(1)}s before request...`);
+      // Small polite delay — proxy rotation handles the 429 prevention,
+      // but we still wait briefly to be respectful
+      const delayMs = randInt(1500, 3000);
       await wait(delayMs);
 
       // Wait for Google results to load
