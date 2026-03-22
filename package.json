@@ -1,0 +1,20 @@
+{
+  "name": "h1b-job-hunter",
+  "version": "2.0.0",
+  "description": "H1B-friendly job hunter for F1 OPT/STEM OPT students — Google ATS edition",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.2.0",
+    "crawlee": "^3.10.0",
+    "playwright": "^1.44.0",
+    "cheerio": "^1.0.0",
+    "csv-writer": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
