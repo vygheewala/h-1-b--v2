@@ -19,7 +19,7 @@
  */
 
 import { PlaywrightCrawler } from 'crawlee';
-import { Actor } from 'apify';
+// Actor import removed — proxy not used for DDG searches
 
 // ── ATS PLATFORMS & JOB BOARDS ────────────────────────────────
 export const ATS_SITES = [
@@ -164,24 +164,19 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
   const kCounts     = {};          // keyword → count (per-keyword limit)
   let   searchsDone = 0;
 
-  // ── APIFY PROXY CONFIGURATION ───────────────────────────────
-  // This rotates the IP address for every Google search request.
-  // Google rate-limits by IP — rotating IPs eliminates 429 errors.
-  // Apify's datacenter proxies are included in the free plan.
-  // If proxy creation fails (e.g. running locally), we continue without it.
-  let proxyConfiguration;
-  try {
-    proxyConfiguration = await Actor.createProxyConfiguration();
-    console.log('   ✅ Apify proxy enabled — IP rotation active');
-  } catch {
-    console.log('   ⚠️  Proxy unavailable — running without IP rotation');
-  }
+  // NOTE: We do NOT use Apify proxy for DuckDuckGo searches.
+  // DDG has zero rate limiting so no proxy is needed.
+  // More importantly, Apify's datacenter proxy IPs are flagged as
+  // "botnet" by DuckDuckGo (cc=botnet in anomaly.js) and get
+  // served a CAPTCHA page instead of results.
+  // Proxy is only used when fetching individual ATS job pages (in main.js).
+  console.log('   ✅ Direct connection (no proxy) — DuckDuckGo does not rate limit');
 
   const crawler = new PlaywrightCrawler({
-    maxConcurrency: 1,             // one search at a time — still needed for orderly execution
+    maxConcurrency: 1,
     navigationTimeoutSecs: 30,
     maxRequestsPerCrawl: requests.length,
-    proxyConfiguration,            // rotate IP per request — prevents Google 429
+    // NO proxyConfiguration here — DDG flags proxy IPs as botnet
 
     // Set a random User-Agent before each navigation
     preNavigationHooks: [
