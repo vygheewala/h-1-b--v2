@@ -132,10 +132,11 @@ export function buildSearchRequests(keywords, location, timeFilter) {
         ? `inurl:${ats.site} "${keyword}"${locationSuffix}`
         : `site:${ats.site} "${keyword}"${locationSuffix}`;
 
-      // DuckDuckGo HTML endpoint — no JS rendering needed, no consent walls,
-      // no rate limiting, works perfectly on cloud/datacenter IPs
-      // Using html.duckduckgo.com which returns plain HTML (faster + more reliable)
-      let ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`;
+      // DuckDuckGo LITE endpoint — permanently simple HTML, never redirects,
+      // never uses JavaScript, works on all IPs, no rate limiting.
+      // lite.duckduckgo.com is designed for minimal/curl clients and always
+      // returns the same clean structure regardless of browser vs bot.
+      let ddgUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}&kl=us-en`;
       if (dfParam) ddgUrl += `&${dfParam}`;
 
       requests.push({
@@ -203,48 +204,72 @@ export async function scrapeATSJobs(keywords, location, timeFilter, maxPerKeywor
       const delayMs = randInt(800, 2000);
       await wait(delayMs);
 
-      // ── WAIT FOR DUCKDUCKGO RESULTS ───────────────────────────
-      // DuckDuckGo HTML endpoint returns a plain HTML page with results
-      // in <div class="result"> elements — no JavaScript needed
+      // ── WAIT FOR DUCKDUCKGO LITE RESULTS ─────────────────────
+      // lite.duckduckgo.com always returns a simple HTML table.
+      // Results are in <tr> rows — the first column has the link,
+      // the second has the snippet. No JS, no redirects, always consistent.
       try {
-        await page.waitForSelector('.result, .results, #links, .web-result', { timeout: 12000 });
+        await page.waitForSelector('table.results', { timeout: 12000 });
       } catch {
-        log.warning(`   No results for: ${query}`);
+        // Check if it's a "no results" page vs a load failure
+        const bodyText = await page.evaluate(() => document.body?.innerText || '');
+        if (bodyText.toLowerCase().includes('no results')) {
+          log.info(`   No results (DDG found nothing) for: ${query}`);
+        } else {
+          log.warning(`   No results for: ${query}`);
+        }
         return;
       }
-      await wait(500);
+      await wait(300);
 
-      // ── EXTRACT JOB LINKS FROM DUCKDUCKGO RESULTS ────────────
+      // ── EXTRACT JOB LINKS FROM DDG LITE RESULTS ──────────────
+      // lite.duckduckgo.com structure:
+      //   <table class="results">
+      //     <tr>
+      //       <td class="result-link">  ← title + URL
+      //         <a href="ACTUAL_URL">Title</a>
+      //       </td>
+      //       <td class="result-snippet">  ← description text
+      //     </tr>
+      //   ...
       const links = await page.evaluate(({ atsSite }) => {
         const found = [];
 
-        // DuckDuckGo HTML results are in <div class="result"> containers
-        // Each has an <a class="result__a"> with the actual URL
-        const resultDivs = document.querySelectorAll(
-          '.result, .web-result, [data-testid="result"]'
-        );
+        // Each result row in the lite DDG table
+        const rows = document.querySelectorAll('table.results tr');
 
-        resultDivs.forEach((div) => {
-          // Get the main result link
-          const anchor = div.querySelector('a.result__a, a[data-testid="result-title-a"], h2 a, .result__title a');
-          const href   = anchor?.getAttribute('href') || '';
+        rows.forEach((row) => {
+          // Title + URL cell
+          const linkCell    = row.querySelector('.result-link, td:first-child');
+          const snippetCell = row.querySelector('.result-snippet, td:last-child');
 
-          // DuckDuckGo sometimes wraps URLs in a redirect — extract the real URL
+          if (!linkCell) return;
+
+          const anchor = linkCell.querySelector('a');
+          if (!anchor) return;
+
+          const href = anchor.getAttribute('href') || '';
+
+          // lite DDG wraps real URLs in /lite/? redirect — unwrap it
           let realUrl = href;
-          if (href.includes('duckduckgo.com/l/?uddg=')) {
+          if (href.startsWith('/lite/?')) {
             try {
-              const urlParam = new URL(href).searchParams.get('uddg');
-              if (urlParam) realUrl = decodeURIComponent(urlParam);
-            } catch { /* keep original href */ }
+              const params = new URLSearchParams(href.replace('/lite/?', ''));
+              const uddg = params.get('uddg');
+              if (uddg) realUrl = decodeURIComponent(uddg);
+            } catch { /* keep original */ }
+          } else if (href.includes('duckduckgo.com/l/?')) {
+            try {
+              const uddg = new URL('https://duckduckgo.com' + href).searchParams.get('uddg');
+              if (uddg) realUrl = decodeURIComponent(uddg);
+            } catch { /* keep original */ }
           }
 
           if (!realUrl.startsWith('http')) return;
           if (!realUrl.includes(atsSite)) return;
 
-          const titleEl   = div.querySelector('.result__a, .result__title a, h2 a');
-          const snippetEl = div.querySelector('.result__snippet, [data-testid="result-snippet"]');
-          const title     = titleEl?.textContent?.trim()   || '';
-          const snippet   = snippetEl?.textContent?.trim() || '';
+          const title   = anchor.textContent?.trim() || '';
+          const snippet = snippetCell?.textContent?.trim() || '';
 
           if (title) found.push({ url: realUrl, title, snippet });
         });
