@@ -137,21 +137,31 @@ export const H1B_DB = {
  * @returns {object} H1B data
  */
 export function lookupH1BLocal(companyName) {
+  // Guard: skip obviously bad company names from failed URL extraction
+  if (!companyName || companyName.length < 3 || companyName === 'Unknown') {
+    return notFound(companyName);
+  }
+
   const normalized = companyName
     .toLowerCase()
-    .replace(/\b(llc|inc|corp|ltd|co|plc|lp|na|us|usa)\b/g, '')
+    .replace(/\b(llc|inc|corp|ltd|co|plc|lp|na|us|usa|careers|recruiting)\b/g, '')
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  // Guard: after stripping suffixes, if name is too short it's likely garbage
+  if (normalized.length < 3) return notFound(companyName);
 
   // 1. Exact match
   if (H1B_DB[normalized]) {
     return hit(companyName, normalized, H1B_DB[normalized]);
   }
 
-  // 2. Partial match — DB key contained in company name or vice versa
+  // 2. Partial match — require at least 5 chars to avoid false positives
+  // e.g. "us" matching "unitedhealth" — minLen=5 prevents this
   for (const [key, data] of Object.entries(H1B_DB)) {
-    const minLen = Math.max(4, Math.min(key.length, normalized.length) - 2);
+    const minLen = Math.max(5, Math.min(key.length, normalized.length) - 2);
+    if (normalized.length < minLen || key.length < minLen) continue;
     if (normalized.includes(key.slice(0, minLen)) || key.includes(normalized.slice(0, minLen))) {
       return hit(companyName, key, data);
     }
@@ -166,6 +176,18 @@ export function lookupH1BLocal(companyName) {
     avgWage: null,
     source: 'Not in DOL top-sponsor DB — verify manually at myvisajobs.com',
     profileUrl: `https://www.myvisajobs.com/Search_Visa_Sponsor.aspx?T=${encodeURIComponent(companyName)}`,
+  };
+}
+
+function notFound(companyName) {
+  return {
+    found: false,
+    petitionCount: 0,
+    approvalRate: null,
+    latestYear: null,
+    avgWage: null,
+    source: 'Not in DOL top-sponsor DB — verify manually at myvisajobs.com',
+    profileUrl: `https://www.myvisajobs.com/Search_Visa_Sponsor.aspx?T=${encodeURIComponent(companyName || '')}`,
   };
 }
 
